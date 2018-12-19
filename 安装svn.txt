@@ -1,0 +1,398 @@
+
+1.安装apr-1.6.3
+wget https://mirrors.aliyun.com/apache/apr/apr-1.6.3.tar.gz
+tar -zxvf apr-1.6.3.tar.gz
+cd apr-1.6.3
+./configure --prefix=/usr/local/apr
+make && make install
+
+
+2.安装apr-util-1.6.1
+wget https://mirrors.aliyun.com/apache/apr/apr-util-1.6.1.tar.gz
+tar zx apr-util-1.6.1.tar.gz
+cd apr-util-1.6.1
+./configure --prefix=/usr/apr-util --with-apr=/usr/apr/bin/apr
+make && make install
+
+3.wget http://www.sqlite.org/2016/sqlite-autoconf-3130000.tar.gz
+tar xzfv sqlite-autoconf-3130000.tar.gz
+cd sqlite-autoconf-3130000
+./configure --prefix=/usr/local/sqlite
+make && make install
+
+4.wget http://www.zlib.net/zlib-1.2.11.tar.gz
+tar zxf zlib-1.2.11.tar.gz
+cd zlbi-1.2.11
+./configure --prefix=/usr/local/zlib
+make && make install
+
+cp mod_dav_svn.so /usr/local/apache2/modules/
+cp mod_authz_svn.so /usr/local/apache2/modules/
+
+5.下载svn的安装包
+wget https://mirrors.aliyun.com/apache/subversion/subversion-1.9.7.tar.gz
+tar -zxvf subversion-1.9.7.tar.gz
+cd subversion-1.9.7
+./configure --prefix=/usr/local/svn1.9.7 --with-apr=/usr/local/apr --with-apr-util=/usr/local/apr-util --with-sqlite=/usr/local/sqlite --with-zlib=/usr/local/zlib --with-apxs=/usr/local/apache2/bin/apxs
+make && make install
+
+6.配置环境变量
+PATH=/usr/local/svn1.9.7/bin:$PATH
+export path
+  保存之后测试 svnserve --version
+
+7.svn仓库创建
+mkdir /data/svn
+cd /data/svn
+svnadmin create ccp
+htpasswd -c /data/svn/svn_passwd admin
+在你的版本库的conf目录中会有两个文件用户秘密：passwd，权限：authz;但是这里我不用这两个文件，因为每个库都管理这两个文件太麻烦，所以我想把用户和权限统一管理，所以我在/data/svn/目录下建立两个文件svn_passwd、svn_authz用来管理所有的版本库。
+
+svn_passwd文件内容：
+[users]
+admin = admin
+test = test
+#等号前：用户名，等号后：密码
+
+svn_authz文件内容
+[groups]
+admins = admin,test
+[test:/]
+@admin=rw
+
+
+8.修改版本库的配置文件（引用svn_passwd和svn_authz文件）
+
+    vi /data/svn/ccp/conf/svnserve.conf
+    [general]
+    anon-access = none
+    auth-access = write
+    password-db = /data/svn/svn_passwd #你刚才建立的用户文件
+    authz-db = /data/svn/svn_authz
+    realm = ccp #你建的版本库
+    
+    
+    cp   /data/software/subversion-1.9.7/subversion/mod_dav_svn/.libs/mod_dav_svn.so   /usr/local/apache2/modules/
+    cp  /data/software/subversion-1.9.7/subversion/mod_authz_svn/.libs/mod_authz_svn.so /usr/local/apache2/modules/
+    
+9.启动svn服务
+	svnserve -d -r /data/svn/ccp
+	ps aux|grep svn
+	
+ 10.创建新文件
+ vim /usr/local/apache2/conf/extra/httpd-svn.conf
+			LoadModule dav_svn_module     modules/mod_dav_svn.so
+			LoadModule authz_svn_module   modules/mod_authz_svn.so
+
+<Location /svn>
+   DAV svn
+   SVNParentPath /data/svn/
+   AuthType Basic
+   AuthName "subversion repository"
+   AuthUserFile /data/svn/svn_passwd
+   AuthzSVNAccessFile /data/svn/svn_authz
+   Satisfy Any
+   Require valid-user
+</Location>
+
+<Directory "/usr/local/apache2/htdocs/svnmanager/">
+   AllowOverride None
+   Order deny,allow
+   Deny from all
+   Allow from all
+</Directory>
+
+Alias /svntools "/usr/local/apache2/htdocs/tools"
+<Directory "/usr/local/apache2/htdocs/tools">
+Require valid-user
+AuthType Basic
+AuthName "GridTeam`s subversion tools"
+AuthUserFile "/data/svn/svn_passwd"
+</Directory>
+
+这里面的 tools需要 
+			mkdir  /usr/local/apache2/htdocs/tools
+			cat svnpass.php 
+<?   
+	$auth_user = $_SERVER["PHP_AUTH_USER"];   
+	$auth_pass = $_SERVER["PHP_AUTH_PW"];   
+	if ($_REQUEST["action"] == "modify") {
+		$old_pass = $_REQUEST["oldpass"];   
+		$new_pass = $_REQUEST["newpass"];
+		if ($old_pass != $auth_pass)   
+		    $msg = "Old password is wrong!";
+		else  
+		{   
+		    $cmd = "htpasswd -b /data/svn/svn_passwd $auth_user $new_pass";     #在此是svn_passwd的路径 要写对
+		    system($cmd, $res);   
+		    if ($res == 0)   
+		        $msg = "Change password for [$auth_user] succeed! Please login again.";   
+		    else  
+		        $msg = "Change password for [$auth_user] failed! Please contact server administrator.";   
+		}
+	}
+
+	if (isset($msg)){
+?>
+<script language="javaScript">
+	alert("<?=$msg?>");
+	window.location.href="<?=$_SERVER["PHP_SELF"]?>"
+</script>
+<?
+	}
+?>
+<html>   
+	<head>   
+		<title>Change SVN Password</title>   
+	</head>  
+	<script language = "javaScript">   
+		function check_and_submit(myform) {   
+		    var oldpass = myform.oldpass.value;   
+		    var newpass = myform.newpass.value;   
+		    var repeatpass = myform.repeatpass.value;   
+		    if (oldpass == "") {   
+		        alert("Old password is empty!");   
+		        myform.oldpass.focus(); 
+		        return false;
+		    }
+		    else if (newpass == "") {   
+		        alert("New password is empty!");   
+		        myform.newpass.focus();
+		        return false;   
+		    }
+		    else if (repeatpass == "" || repeatpass != newpass) {   
+		        alert("Repeat password is empty or not same as new password!");   
+		        myform.repeatpass.focus(); 
+		        return false; 
+		    }
+		    myform.submit(); 			        
+		}
+	</script>
+	<body>
+		<form method="post">   
+			<input type="hidden" name="action" value="modify"/>   
+			<table bgcolor="#00CC33">     
+				<tr>   
+					<td colspan=2 align="center">Change SVN Password</td>   
+				</tr> 
+				<tr>   
+					<td>User Name</td>   
+					<td align="left"><?=$auth_user?></td>   
+				</tr>   
+				<tr>   
+					<td>Old Password</td>   
+					<td><input type="password" size=20 name=oldpass></td>   
+				</tr>   
+				<tr>   
+					<td>New Password</td>   
+					<td><input type="password" size=20 name=newpass></td>   
+				</tr>   
+				<tr>   
+					<td>Repeat Password</td>   
+					<td><input type="password" size=20 name=repeatpass></td>   
+				</tr>   
+				<tr>   
+					<td colspan=2>   
+					<input type="button" value="Change" onclick="check_and_submit(this.form)">   
+					<input type="reset" value="Reset">   
+				</td>   
+				</tr>   
+		</table>   
+		</form>   
+	</body>
+</html>
+
+
+
+
+
+
+11.chown -R apache.apache /data/svn/
+			service httpd start 
+			用浏览器访问 http://39.106.6.114/svn/ccp若通过Apache可以访问到则证明Apache与Subversion的结合配置正确
+			
+			
+			
+			
+			
+	安装svnmanager1.09
+	wget http://downloads.sourceforge.net/project/svnmanager/svnmanager/1.09/svnmanager-1.09.tar.gz
+	tar -zxvf svnmanager-1.09.tar.gz
+	cp -rp svnmanager-1.09 /usr/local/apache2/htdocs/svnmanager
+	cd /usr/local/apache2/htdocs/svnmanager
+	cp config.php.linux config.php
+	
+	cat  config.php
+										<?php
+											$lang                = "en_US.UTF-8";
+											//Shell command's
+											$htpassword_cmd      = "/usr/bin/htpasswd";
+											$svn_cmd             = "/usr/bin/svn";
+											$svnadmin_cmd        = "/usr/bin/svnadmin";
+
+											//Subversion locations
+											$svn_repos_loc       = "/data/svn/";
+											$svn_config_dir      = "/data/svn/svn_config";
+											$svn_passwd_file     = "/data/svn/svn_passwd";
+											$svn_access_file     = "/data/svn/svn_authz";
+											$svnserve_user_file  = "";
+											$svn_trash_lo        = "";
+											$smtp_server         = "smtp.mailserver.net";
+											$dsn                 = "mysqli://svnmanager:svnmanager@39.106.6.114/svnmanager";  #这里原来是mysqli连接 要变成 mysql连接
+											$admin_name          = "admin";
+											$admin_temp_password = "admin";
+											?>
+											
+安装VersionControl_SVN-0.3.1									
+					pear install --alldeps VersionControl_SVN-0.3.1
+					pear list   可以看到是否已经把需要的安装好了						
+					Package            Version State
+							Archive_Tar        1.3.11  stable
+							Console_Getopt     1.3.1   stable
+							PEAR               1.9.4   stable
+							Structures_Graph   1.0.4   stable
+							VersionControl_SVN 0.3.1   alpha
+							XML_Parser         1.3.7   stable
+							XML_RPC            1.5.4   stable
+							XML_Util           1.2.1   stable
+					
+					wget http://download.pear.php.net/package/VersionControl_SVN-0.3.1.tgz
+					tar -zxvf VersionControl_SVN-0.3.1.tgz
+					mv VersionControl_SVN-0.3.1 /usr/local/apache2/htdocs/svnmanager/VersionControl
+修改权限
+					chown -R apache:apache /usr/local/apache2/htdocs/
+注意 VersionControl的版本 一定要和pear 安装的一致否则 当访问svnmanager的时候会报错
+
+
+创建svnmanager专有的数据库和用户
+mysql -uroot -p
+create database svnmanager
+grant all on svnmanager.* to 'svnmanager'@'%' identified by 'svnmanager';
+flush privileges;
+quit;
+
+
+
+通过上面的配置，SVN服务器通过HTTP访问基本就没有问题了，接着配置HTTPS访问
+
+    #cd /etc/pki/tls/private
+
+    #openssl genrsa -out my.key 1024
+
+    #openssl req -new -key my.key -out my.csr
+
+    #cd /etc/pki/tls/certs
+
+    #openssl x509 -req -days 365 -in /etc/pki/tls/private/my.csr -signkey /etc/pki/tls/private/my.key -out my.crt
+
+
+以上步骤必须在相关文件夹下产生所需的文件，保证输入命令正确，保证产生文件所在文件夹正确，否则后面将可能发生错误
+
+ 
+
+修改/etc/httpd/conf.d/ssl.conf文件
+
+    SSLCertificateFile /etc/pki/tls/certs/my.crt
+
+    SSLCertificateKeyFile /etc/pki/tls/private/my.key
+
+
+修改/etc/httpd/conf/httpd.conf文件
+
+    <Directory />
+
+    Options FollowSymLinks
+
+    AllowOverride None
+
+    SSLRequireSSL //添加此行
+
+    </Directory>
+
+
+
+重启httpd
+
+    #service httpd restart
+
+
+如此SVN就只可以通过HTTPS访问了，并且能够对多个项目分配人员和权限。
+
+
+
+svn的自动备份脚本使用
+
+目标库操作
+
+新建：
+svnadmin create repo
+
+cd repo/hooks/
+cp pre-revprop-change.tmpl pre-revprop-change
+vi pre-revprop-change
+最后一行exit 1修改为exit 0
+
+cd repl/conf
+修改authz、passwd、svnseve.conf
+--authz
+[/]
+用户 = rw
+
+--passwd
+用户 = 密码
+
+svnserve.conf
+取消authz-db和password-db的#注释，注意该变量需在行首，不然会报错
+
+启动svn服务
+
+svnserve -d -r /path/to/   #注意，不要启动到/path/to/repo
+
+源库操作：
+
+vi ~/.subversion/servers 
+取消#注释：store-plaintext-passwords = no
+
+初始化
+svnsync initialize svn://目标地址/repo svn://源库地址/repo --username 用户 --password 密码
+同步数据
+svnsync sync svn://目标库/code --username 用户 --password 密码
+同步完成后操作：
+
+cd repo/hooks
+cp post-commit.tmpl post-commit
+vi post-commit
+
+注释mailer.py commit "$REPOS" "$REV" /path/to/mailer.conf
+
+增加提交同步命令(绝对路径)
+
+
+
+有一次 svnmanager报错 修改权限的时候页面空白 观察发现会写入到数据库但是不能写入到svn的权限文件中去 观看日志后发现有这样一句话
+Database inconsistent, can't find user that owns repository! 
+去数据库中查看 select * from repositories;
++----+---------+---------+-------------+
+| id | name    | ownerid | description |
++----+---------+---------+-------------+
+|  4 | ccp8081 |      87 |             |
+|  5 | ccp     |      87 |             |
++----+---------+---------+-------------+
+
+出现这样的结果 查看对应的用户主是87 号 但是 select * from users;
++----+-----------+----------------------------------+------------------------+-------+------------------+-------------------+
+| id | name      | password                         | email                  | admin | repositorygrants | svnserve_password |
++----+-----------+----------------------------------+------------------------+-------+------------------+-------------------+
+|  3 | gaoxl1    | 91646c996ea43fbf54fb43a97444bf55 | gaoxl1@yusys.com.cn    |   255 |                0 |                   |
+|  4 | fanna1    | 41aadaa87836b61335b73b3c846124c4 | fanna1@yusys.com.cn    |     0 |                0 |                   |
+|  5 | gaoxl2    | 820e166480d883297b77c91e1400c441 | gaoxl2@yusys.com.cn    |     0 |                0 |                   |
+|  7 | zhengjh4  | e43849340ad66c6a1315e6a54f38dcb0 | zhengjh4@yusys.com.cn  |     0 |                0 |                   |
+|  9 | liuqq     | a211ca5b46928e4677b2c0fd6df0bb1e | liuqq@yusys.com.cn     |     0 |                0 |                   |
+| 10 | zhangtong | e87d05cdd2af71fb6b45bcd4f01ccdea | zhangtong@yusys.com.cn |   255 |                0 |                   |
+| 11 | huangft1  | e5547fb1a82b59d7ae185ab53128a368 | huangft1@163.com       |     0 |                0 |                   |
+
+只有这几个 那就把 87 变成现有的用户 之后 变成4号之后  就不在有 出现空白页面不能写入  accessfile （svn权限文件）的事情了
+
+由于目标计算机积极拒绝 无法连接
+这种错误的问题是由于 输入可能有问题 才造成的 需要仔细检查 输入的路径
+

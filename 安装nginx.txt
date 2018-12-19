@@ -1,0 +1,124 @@
+1.安装依赖关系
+	yum -y install gcc gcc-c++ make libtool zlib zlib-devel openssl openssl-devel pcre pcre-devel  autoconf automake 
+
+2       wget -O openssl.tar.gz -c https://github.com/openssl/openssl/archive/OpenSSL_1_0_2k.tar.gz 
+
+	tar zxf openssl.tar.gz
+
+	mv openssl-OpenSSL_1_0_2k/ openssl
+
+3.http://nginx.org/en/download.html在这个网站上下载需要的nginx版本
+	wget -c https://nginx.org/download/nginx-1.11.13.tar.gz 
+
+4.下载之后进行解压
+ 	tar -zxvf nginx-1.11.13.tar.gz
+
+5.解压之后进入到nginx文件夹里面 运行 
+	cd nginx-1.11.13
+
+	./configure  --prefix=/usr/local/nginx/ --with-openssl=/root/openssl --with-http_v2_module --with-http_ssl_module --with-http_gzip_static_module --with-http_stub_status_module --with-file-aio --with-http_realip_module
+	
+	make && make install
+
+6.groupadd nginx useradd -g nginx nginx -s /bin/false
+
+7.配置防火墙80端口
+ 	vi /etc/sysconfig/iptables
+ 	在里面添加 -A INPUT -m state --state NEW -m tcp -p tcp  --dport 80 -j ACCEPT
+
+8.重启防火墙  
+	service iptables restart
+
+9.启动nginx
+	(1)启动
+	/usr/local/nginx/sbin/nginx -c /usr/local/nginx/conf/nginx.conf
+	cd /usr/local/nginx/sbin
+	./nginx 
+	(2)停止
+	ps -ef|grep nginx 
+	kill -9 停止掉master进程
+	/usr/local/nginx/sbin/./nginx -s stop
+	(3)重启
+	/usr/local/nginx/sbin/nginx -s reload
+	(4)测试
+	netstat -na | grep 80
+
+vim nginx.conf
+	user  zabbix;
+worker_processes  1;
+
+#error_log  logs/error.log;
+error_log  logs/error.log  notice;
+
+#error_log  logs/error.log  info;
+
+#pid        logs/nginx.pid;
+
+
+events {
+    worker_connections  1024;
+}
+
+
+http {
+    include       mime.types;
+    default_type  application/octet-stream;
+
+
+    #access_log  logs/access.log  main;
+    client_max_body_size 40m;
+    sendfile        on;
+
+    keepalive_timeout  65;
+
+    #gzip  on;
+
+    server {
+        listen       81;
+        server_name  localhost;
+
+        #charset koi8-r;
+
+        #access_log  logs/host.access.log  main;
+
+        location / {
+            root   html;
+            index  index.html index.php index.htm;
+        }
+
+        #error_page  404              /404.html;
+
+        # redirect server error pages to the static page /50x.html
+        #
+        error_page   500 502 503 504  /50x.html;
+        location = /50x.html {
+            root   html;
+        }
+
+
+        location ~ \.php$ {
+            root           html;
+            fastcgi_pass   127.0.0.1:9000;
+            fastcgi_index  index.php;
+            fastcgi_param  SCRIPT_FILENAME  /usr/local/nginx/html$fastcgi_script_name;
+            include        fastcgi_params;
+        }
+    }
+
+    server {
+        listen 82;
+
+        location /nginx_stat {
+        stub_status on;
+        access_log off;
+        allow 39.106.6.114;
+        allow 127.0.0.1;
+        deny all;
+		}
+ 	}
+
+}
+
+-------------------------------------------------------------------------------------------------
+
+

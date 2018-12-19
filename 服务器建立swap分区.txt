@@ -1,0 +1,62 @@
+如何启用swap分区？
+
+步骤如下：
+
+1.查看当前系统中是否已经启用swap分区
+1
+2
+	
+cat /proc/swaps   
+top
+
+2.如果没有启用swap分区功能，则新建一个专门的文件用于swap分区
+1
+	
+dd if=/dev/zero of=/data/swap bs=512 count=8388616
+
+注：此文件的大小是count的大小乘以bs大小，上面命令的大小是4294971392，即4GB
+
+3.通过mkswap命令将上面新建出的文件做成swap分区
+1
+	
+mkswap /data/swap
+
+4.查看内核参数vm.swappiness中的数值是否为0，如果为0则根据实际需要调整成30或者60
+1
+2
+3
+	
+cat /proc/sys/vm/swappiness   
+sysctl -a | grep swappiness    
+sysctl -w vm.swappiness=60
+
+注：若想永久修改，则编辑/etc/sysctl.conf文件
+
+5.启用此交换分区的交换功能
+1
+2
+	
+swapon /data/swap   
+echo "/data/swap swap swap defaults    0  0" >> /etc/fstab
+
+如何关闭swap分区？
+1
+2
+	
+swapoff /data/swap   
+swapoff -a >/dev/null
+
+关于多个交换分区在使用上的优先级    
+如果你有多于一个交换文件或交换分区，你可以给它们各自分配一个优先级值(0 到 32767)。系统会在使用较低优先级的交换区域前优先使用较高优先级的交换区域。例如，如果你有一个较快的磁盘 (/dev/sda) 和一个较慢的磁盘 (/dev/sdb)，给较快的设备分配一个更高的优先级。优先级可以在 fstab 中通过 pri 参数指定：    
+1
+2
+	
+/dev/sda1 none swap defaults,pri=100 0 0    
+/dev/sdb2 none swap defaults,pri=10  0 0
+
+或者通过 swapon 的 ?p (或者 ??priority) 参数：    
+1
+	
+swapon -p 100 /dev/sda1
+
+如果两个或更多的区域有同样的优先级，并且它们都是可用的最高优先级，页面会按照循环的方式在它们之间分配。

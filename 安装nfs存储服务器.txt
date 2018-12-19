@@ -1,0 +1,93 @@
+nfs-utils:NFS服务的主程序，包括rpc.nfsd,rpc.mountd这两个daemon和相关文档说明，以及执行命令文件等
+yum install -y nfs-utils
+rpcbind:cebtos6.* 下面RPC的主程序，centos5.x里面称为protmap
+yum install -y rpcbind
+
+启动软件先启动rpcbind再启动nfs,nfs需要想rpcbind注册信息，且只在启动后注册一次
+关闭软件先关闭nfs,在关闭rpcbind,先关闭rpcbind会导致客户端使用df -h等命令直接卡死
+
+启动：/etc/init.d/rpcbind start /etc/init.d/nfs start
+	ss -ntlup|egrep "rpcbind|nfs"
+	查看本地rpc中的端口 rpcinfo -p localhost
+
+修改nfs配置文件
+	vim  /etc/exports
+	/data 192.168.1.0/24(rw,sync)
+	要共享的目录 空格 贡献的网段（参数）#注意网段和参数的括号之间不能有空格
+	网段规则
+		192.168.1.197	指定单个客户端
+		192.168.1.0/24	指定整个网段客户端
+		www.abc.com	指定整个域名客户端
+
+
+参数			作用
+rw			可读写
+ro			可读不可写
+sync			同步，直接写到磁盘
+async			异步，先写到内存，再写到磁盘
+no_root_squash		root用户不映射/压缩，客户端以root用户创建的东西属主和属组是root
+root_squash		root用户也进行映射或压缩，客户端以root用户创建的东西属猪和属组是指定的用户，如果没有指定是nfsnobody
+all_squash		所有的用户都映射/压缩，客户端不管是以什么用户创建的东西属主和属组都是指定的用户，如果没有指定是nfsnibody
+anonuid			指定映射的用户的uid,这个不设置时默认是映射为nfsnobody
+anongid			指定映射的用户的gid,这个不设置时默认是映射为nfsnobody
+
+
+这里说下nfs同步和异步的对比
+	异步：存入内存中
+		优点:传输数据快
+		缺点:数据传输不可靠，容易丢失数据
+	同步：存入硬盘中
+		优点:传输数据可靠，不易丢数据
+		缺点:数据传输慢
+
+
+
+修改之后需要重启nfs服务让配置文件生效
+	/etc/init.d/nfs reload
+	reload 平滑重启，对正在使用的不影响
+	如果用restart重启后，nfs会进入90s的无敌时间，不允许操作，客户端在已经挂载的情况下使用df -h或在共享文件中创建文件或目录等于共享目录有关联的操作时会卡住。90s这个数值在/etc/sysconfig/nfs中配置
+
+
+重启之后showmount -e查看/etc/exports文件信息
+	showmount -e 192.168.1.197
+
+	chown nfsnobody.nfsnobody /data  ##不对映射用户设定默认是映射为nfsnobody用户
+
+设置服务开机自启动
+
+	1.chkconfig管理
+	  chkconfig rpcbind on
+	  chkconfig nfs on
+	查看启动顺序
+	ls /etc/rc.d/rc3.d/ |egrep "rpcbind|nfs"
+	K61nfs-rdma
+	S13rpcbind  		##rpcbind第13个启动
+	S14nfslock
+	S30nfs			##nfs第30个启动
+	2.放到rc.loacl文件中
+	echo -e "/etc/init.d/rpcbind start\n/etc/init.d/nfs start">>/etc/rc.loacl
+
+NFS共享服务排错思路
+	1.检查注册信息是否存在
+	rpcinfo -p 192.168.1.197
+	2.检查挂载列表信息
+	showmount -e 192.168.1.197
+	3.权限问题确认
+	共享目录权限确认
+	共享配置文件权限
+
+
+NFS客户端配置
+安装nfs-utils和rpcbind服务
+	yum install -y nfs-utils rpcbind
+	/etc/init.d/rpcbind start
+
+查看共享目录信息
+	showmount -e 192.168.1.197
+创建挂载目录并挂载
+	mkdir /nfs
+	mount -t nfs 192.168.1.197:/data /nfs
+查看挂载情况
+	df -h
+设置开机自动挂载
+	echo "mount -t nfs 172.16.1.31:/data /data" >>/etc/rc.loacl

@@ -1,0 +1,191 @@
+
+
+在数据库中创建 账号和数据库 
+create database reviewdb
+grant all on *.* to 'gerrit'@'%' identified by 'gerrit';
+flush privileges;
+
+
+
+java -jar gerrit-2.6.1.war init -d  /usr/local/gerrit/
+
+Create '/usr/local/gerrit' [Y/n]?   
+
+
+*** Git Repositories
+***
+
+Location of Git repositories [git]:
+## git 代码仓库的位置, 默认会在之前敲的init -d 目录下新建一个git文件夹  我们回车表示默认地址
+*** SQL Database
+***
+
+Database server type [H2/?]: mysql  //改成MYSQL或者使用H2
+
+*** User Authentication
+***
+
+Authentication method [OPENID/?]: HTTP   //注意这个不要按回车跳过去了，否则不是HTTP认证，是需要用google的OPENID
+Get username from custom HTTP header [y/N]? :
+SSO logout URL : 
+
+*** Email Delivery
+***
+
+SMTP server hostname [localhost]:
+SMTP server port [(default)]:
+SMTP encryption [NONE/?]:
+SMTP username [?]:
+
+yourname@xxxxx.com's password :
+confirm password :
+
+*** Container Process
+***
+
+Run as [project]:
+Java runtime [/usr/lib/jvm/java-6-sun-1.6.0.24/jre]:
+Copy gerrit.war to /home/gerrit2/review-site/bin/gerrit.war [Y/n]?
+Copying gerrit.war to /home/gerrit2/review-site/bin/gerrit.war
+
+*** SSH Daemon
+***
+
+Listen on address [*]:
+Listen on port [29418]:       //如果同一个用户下建多个gerrit，请不用都公用29418这个端口号 如39418 49418
+N
+Gerrit Code Review is not shipped with Bouncy Castle Crypto v144
+  If available, Gerrit can take advantage of features
+  in the library, but will also function without it.
+Download and install it now [Y/n]? 
+Downloading http://www.bouncycastle.org/download/bcprov-jdk16-144.jar ... OK
+Checksum bcprov-jdk16-144.jar OK
+Generating SSH host key ... rsa... dsa... done
+*** HTTP Daemon
+*** 
+
+Behind reverse proxy           [y/N]? y      
+
+//使用反向代理的话必须选择y来配置，默认是N
+
+
+
+Proxy uses SSL (https://) [y/N]? n
+
+
+
+Subdirectory on proxy server   [/]: 
+
+Listen on address              [*]: 
+
+Listen on port                 [8081]:          //切记，此端口号一定不要和apache2占用相同的端口号，多个gerrit可以8082 8083 8084                                                			//否则就会Starting Gerrit Code Review:Failed
+
+Canonical URL                  [http://*/]:http://39.106.6.114:8081/
+
+Initialized /home/gerrit2/review-siteExecuting 
+
+/home/gerrit2/review-site/bin/gerrit.sh start
+
+Starting Gerrit Code Review: OK
+
+
+
+修改配置文件 /usr/local/gerrit/etc/gerrit.conf
+
+[gerrit]  
+       basePath = git //指定被gerrit管理的所有git库存放位置，即review_site_project/git/ 
+       canonicalWebUrl = http://39.106.6.114:8088/  //指定web访问gerrit的网址//填自己的ip和端口号，勿完全抄
+[database]
+        type = mysql
+        hostname = 39.106.6.114
+        database = reviewdb
+        username = gerrit
+[index]
+        type = LUCENE
+[auth]
+       type = HTTP //指定浏览器登录gerrit时的认证方式
+[sendemail]
+        smtpServer = localhost
+
+[container]
+       user = gerrit //指定gerrit所在机器的用户身份与上文创建的用户对应一致
+       javaHome = /usr/local/java/jdk1.8.0_141/jre  //输入echo $JAVA_HOME来获取地址 后面加上jre
+[sshd]
+       listenAddress = *:29418 //指定sshd服务监听的端口号
+[httpd]
+       listenUrl = proxy-http://39.106.6.114:8082/ //指定http代理地址
+[cache]
+       directory = cache   //缓存位置
+
+
+在nginx和apache中分别做反向代理配置
+
+在nginx的配置文件中这样配置
+
+server {
+        listen          8088;
+        server_name     39.106.6.114;
+
+        location / {
+                proxy_pass              http://39.106.6.114:8082;
+                proxy_set_header        X-Forwarded-For $remote_addr;
+                proxy_set_header        Host $host;
+                auth_basic              "Gerrit Code Review";
+                auth_basic_user_file    /usr/local/gerrit/gerrit.passwd;
+        }
+
+}
+
+在apache的配置文件里加上
+
+cat gerrit.conf 
+<VirtualHost *:8088>
+  ServerName localhost
+  ProxyRequests Off
+  ProxyVia Off
+  ProxyPreserveHost On
+
+  <Proxy *>
+    Order deny,allow
+    Allow from all
+  </Proxy>
+
+  <Location /login/>
+      AuthType Basic
+      AuthName "Gerrit Code Review"
+      AuthBasicProvider file
+      AuthUserFile /usr/local/gerrit/passwd
+      Require valid-user
+  </Location>
+
+  ProxyPass / http://localhost:8082/
+  #SetEnv force-proxy-request-1.0.1  
+  #SetEnv proxy-nokeepalive 1
+</VirtualHost>
+
+
+
+然后再把监听8088的端口加上
+
+#无论是运用nginx还是apache作为反向代理服务器 这一步都只能用htpasswd来操作
+在用 htpasswd -cb /usr/local/gerrit/gerrit.passwd admin admin
+
+重新启动 apache 
+service httpd restart
+重新启动nginx
+/usr/local/nginx/sbin/nginx -s reload
+
+启动gerrit
+/usr/local/gerrit/bin/gerrit.sh restart
+
+
+
+在浏览器输入 http://39.106.6.114:8088/
+
+
+
+
+
+[error] [client 219.143.184.27] (13)Permission denied: Could not open password file: /usr/local/gerrit/passwd
+当出现这个错误 的时候 无法读取 密码文件  需要chmod -R o+x gerrit  这样就解决了
+

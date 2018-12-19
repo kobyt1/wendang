@@ -1,0 +1,2 @@
+echo 'multilib_policy=all' >> /etc/yum.conf
+yum install -y glibc* libstdc* libstdc++* kernel-devel libpam.so* pam* pam-devel*

@@ -1,0 +1,17 @@
+yum -y install gcc gcc-c++ 
+
+wget https://github.com/libevent/libevent/releases/download/release-2.1.8-stable/libevent-2.1.8-stable.tar.gz
+tar -zxvf ../tar/libevent-2.1.8-stable.tar.gz
+cd libevent-2.1.8-stable/
+./configure --prefix=/usr/local
+make -j2 && make install
+
+wget wget http://memcached.org/files/memcached-1.5.7.tar.gz
+tar -zxvf ../tar/memcached-1.5.7.tar.gz 
+cd memcached-1.5.7/
+./configure --with-libevent=/usr/local
+make -j2 && make install
+
+
+
+/usr/local/bin/memcached -d -m 1024m -u root -p 9999 -P /tmp/memcached.pid

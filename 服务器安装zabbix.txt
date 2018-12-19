@@ -1,0 +1,20 @@
+安装依赖 yum -y install gcc gcc-c++ autoconf automake zlib zlib-devel openssl openssl-devel pcre-devel
+一、创建、导入zabbix数据库
+
+cd /usr/local/src #进入软件包下载目录
+
+tar zxvf zabbix-2.2.6.tar.gz #解压
+
+cd /usr/local/src/zabbix-2.2.6/database/mysql #进入mysql数据库创建脚本目录
+
+mysql -uroot -p #进入数据库
+create database zabbix character set utf8;
+grant all on zabbix.* to 'zabbix'@'%' identified by 'zabbix' with grant option;
+flush privileges;
+use zabbix;
+source /usr/local/src/zabbix-3.2.0/database/mysql/schema.sql #导入脚本文件到zabbix数据库
+source /usr/local/src/zabbix-3.2.0/database/mysql/images.sql #导入脚本文件到zabbix数据库
+source /usr/local/src/zabbix-3.2.0/database/mysql/data.sql   #导入脚本文件到zabbix数据库
+#需要按照这个顺序来导入
+
+

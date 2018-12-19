@@ -1,0 +1,24 @@
+首先安装好 jdk maven
+安装tomcat
+cd /usr/local
+tar -zxvf /data/tar/apache-tomcat-8.5.30.tar.gz
+mv apache-tomcat-8.5.30 tomcat
+cd bin 
+执行./startup.sh
+浏览器输入 39.106.6.114:8080
+
+
+安装jenkins
+拷贝下载好的jenkins.war  （下载地址： http://mirrors.jenkins-ci.org/war/）
+mkdir /usr/local/tomcat/webapps/jenkins -p
+mv /data/tar/jenkins.war /usr/local/tomcat/webapps/jenkins
+cd /usr/local/tomcat/webapps/jenkins 
+jar -xvf jenkins.war
+vim /etc/profile
+export JENKINS_HOME=/usr/local/tomcat/webapps/jenkins
+source /etc/profile
+
+再启动tomcat进行安装
+
+
+如果启动报错可以在tomcat的  /bin/tomcat/catalina.sh中加上JAVA_OPTS="-server -Djava.awt.headless=true "

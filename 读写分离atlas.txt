@@ -1,0 +1,44 @@
+Master:192.168.1.201
+Slave:192.168.1.202
+Atlas:192.168.1.203
+atlas和主从配置搭配的时候需要把程序的数据库地址写的是Atlas的ip
+打开/usr/local/mysql-proxy/log/test_sql.log
+然后就可以看到了
+下载是 wget 
+然后 rpm -ivh Atlas-2.2.1.rpm
+然后就是在/usr/local/mysql-proxy
+cd /conf
+vim test.cnf
+
+[mysql-proxy]
+admin-username = user
+admin-password = pwd
+#Atlas后端连接的mysql主库的IP和端口，可设置多项，用逗号分隔
+proxy-backend-addresses = 192.168.1.201:3306
+#Atlas后端连接的mysql从库的IP和端口，@后面的数字代表权重，用来做负载均衡，若省略则默认为1，可设置多项，用逗号分隔
+proxy-read-only-backend-addresses=192.168.1.202:3306
+#用户名与其对应的密码，用/usr/local/mysql-proxy/bin/encrypt
+pwds = backup:yU4TuGo3ReQ=
+#设置Atlas的运行方式，设为true时为守护进程
+daemon = true
+keepalived = true
+#工作线程数，对Atlas的性能有很大影响，可根据情况而定
+event-threads =8
+#日志级别
+log-level=message
+#日志存放路径
+log-path=/usr/local/mysql-proxy/log
+#sql日志的开关
+sql-log=REALTIME
+#Atlas监听的工作接口ip和端口
+proxy-address = 0.0.0.0:1234
+#Atlas监听的管理接口ip和端口
+proxy-address = 0.0.0.0:2345
+
+
+
+以管理接口登录时mysql -uuser -ppwd -h192.168.1.203 -P2345
+SELECT * FROM HELP;
+SELECT * FROM backends;
+
+读写分离实现了

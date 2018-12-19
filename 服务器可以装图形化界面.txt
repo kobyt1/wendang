@@ -1,0 +1,2 @@
+yum install xdm xterm -y
+然后找到这个软件MobaXterm就可以了

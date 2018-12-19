@@ -1,0 +1,71 @@
+1. 下载地址： http://dev.mysql.com/downloads/benchmarks.html
+2. rz sysbench-0.4.12.14
+3. tar -zxvf sysbench-0.4.12.14.tar.gz
+
+
+1.yum install gcc gcc-c++ automake make libtool mysql-community-devel
+
+
+2.git clone https://github.com/akopytov/sysbench.git
+
+3.cd sysbench && ./autogen.sh
+
+4../configure --prefix=/usr/local/sysbench --with-mysql-includes=/usr/local/mysql/include --with-mysql-libs=/usr/local/mysql/lib
+
+5.make && make install 
+（如果报错 就把 cp /usr/local/sysbench/bin/sysbench /usr/local/sysbench）
+然后修改 vim /etc/ld.so.conf
+	include /usr/local/mysql/lib/
+然后
+	/sbin/ldconfig -v
+然后就可以了
+6.	sysbench --version
+		sysbench 1.1.0-b8dd016
+	sysbench --help
+		Usage:
+  		   sysbench [options]... [testname] [command]
+
+7.Sysbench压测MySQL流程：prepare(准备数据) -> warmup（预热）-> run(运行测试) -> cleanup(清理数据)
+下面是目前社区提供的lua脚步（安装sysbench默认自带）
+
+8.以oltp_read_only.lua为例压测MySQL：
+	sysbench /usr/local/sysbench/share/sysbench/oltp_read_write.lua --mysql-host=139.199.113.30 --mysql-port=3306 --mysql-user=backup --mysql-password='backup' --mysql-db=sbtest --db-driver=mysql --tables=10 --table-size=100000 --report-interval=10 --threads=128 --time=120 	prepare
+	生成测试数据
+	
+	sysbench /usr/local/sysbench/share/sysbench/oltp_read_write.lua --mysql-host=139.199.113.30 --mysql-port=3306 --mysql-user=backup --mysql-password='backup' --mysql-db=sbtest --db-driver=mysql --tables=10 --table-size=100000 --report-interval=10 --threads=128 --time=120 	warmup
+	预热数据
+
+	sysbench /usr/local/sysbench/share/sysbench/oltp_read_write.lua  --mysql-host=139.199.113.30 --mysql-port=3306 --mysql-user=backup --mysql-password='backup' --mysql-db=sbtest --db-driver=mysql --tables=10 --table-size=100000 --report-interval=10 --threads=128 --time=120 run
+	进行压力测试
+
+
+观察记录数值和 监控中的数值做对比
+压测结果除了tps/TpmC指标外，还应该关注压测期间的系统负载数据，尤其是 iops、iowait、svctm、%util、每秒I/O字节数(I/O吞吐)、事务响应时间(tpcc-mysql/sysbench 打印的测试记录中均有)。另外，如果I/O设备能提供设备级 IOPS、读写延时 数据的话，也应该一并关注
+
+
+参数说明：
+	--time=N ：最大执行时间，单位是s，默认是[0] ,不限制。
+
+	--time=N ：最大执行时间，单位是s，默认是[0] ,不限制。
+
+	--table_size ：创建多少张表进行测试	
+
+	--threads=N ：创建测试线程的数量, 默认为[1]。	
+	
+	--table_size ：	每张表初始化的数据数量
+
+	--report-interval=N ：报告中间统计信息间隔，0代表禁止，默认为[0]。
+	
+	--mysql-host=[LIST,...] ：MySQL服务器地址[localhost]。
+
+	--mysql-port=[LIST,...] ：MySQL服务器端口[3306]。
+
+	--mysql-socket=[LIST,...] ：MySQL服务器的socket地址。
+
+	--mysql-user=STRING ：MySQL服务器的用户名[sbtest]。
+
+	--mysql-password=STRING ：MySQL用户名密码。
+
+	--mysql-db=STRING ：MySQL数据库名称[sbtest]。
+
+	--mysql-compression[=on|off] ：是否使用压缩[off]。

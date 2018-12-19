@@ -1,0 +1,31 @@
+yum -y install pcre-devel openssl-devel zlib-devel expat-devel
+
+wget https://mirrors.tuna.tsinghua.edu.cn/apache/httpd/httpd-2.4.29.tar.gz
+wget http://mirrors.tuna.tsinghua.edu.cn/apache//apr/apr-util-1.6.1.tar.gz
+wget http://mirrors.tuna.tsinghua.edu.cn/apache//apr/apr-1.6.3.tar.gz
+
+
+tar -zxvf apr-1.6.3.tar.gz
+cd apr-1.6.3
+./configure --prefix=/usr/local/apr-1.6.3
+make && make install
+
+tar -zxvf apr-util-1.6.1.tar.gz
+./configure --prefix=/usr/local/apr-util --with-apr=/usr/local/apr-1.6.3 
+make && make install
+
+tar -zxvf httpd-2.4.29.tar.gz
+cd httpd-2.4.29/
+./configure --enable-rewrite --enable-so --enable-ssl  --enable-dav --enable-deflate --enable-expires --enable-cgi  --with-apr=/usr/local/apr-1.6.3 --with-apr-util=/usr/local/apr-util  --with-pcre=/usr/local/pcre/  --with-mpm=worker --enable-mods-shared=all  --enable-mpms-shared=all --enable-maintainer-mode
+make -j2 && make install
+
+
+
+修改配置文件的端口vi /usr/local/apache2/conf/httpd.conf
+	添加一个  ServerName localhost:80
+然后启动
+/usr/local/apache2/bin/apachectl start
+
+service httpd start
+
+/etc/init.d/httpd start

@@ -1,0 +1,16 @@
+mkdir  -p /home/mw/mycat
+useradd -u 701 -d /home/mw/mycat -s /bin/bash mycat
+passwd mycat
+安装jdk
+su - mycat
+vi ~/.bash_profile
+增加：
+export JAVA_HOME=/usr/local/java/jdk1.8.0_141
+export PATH=$JAVA_HOME/bin:/home/mw/mycat/mycat/bin:$PATH
+安装mycat
+su - mycat
+tar -zxvf Mycat-server-1.5-RELEASE-20160301083012-linux.tar.gz
+mv mycat mycat-1.5
+ln -s mycat-1.5/ mycat
+
+然后就可以启动

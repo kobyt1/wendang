@@ -1,0 +1,75 @@
+我是用两台虚拟机模拟6个节点，一台机器3台，创建出3个master,3slave环境
+redis 是 redis-3.2.4版本
+两台都是centos,一台ip:192.168.1.198 另一台ip:192.168.1.199
+安装：
+cd /usr/local/
+wget http://download.redis.io/releases/redis-3.2.4.tar.gz
+tar -zxvf redis-3.2.4.tar.gz
+mv redis-3.2.4 redis
+cd redis
+make && make install
+cd src
+cp redis-trib.rb /usr/local/bin/
+mkdir redis_cluster
+mkdir 7000 7001 7002 
+cp /usr/local/redis/redis.conf /7000
+cp /usr/local/redis/redis.conf /7001
+cp /usr/local/redis/redis.conf /7002
+
+分别修改这三个配置文件，修改如下内容
+复制代码
+
+	port  7000                   //7000里面的配置文件就设置成7000，7001下面的就设置成7001，其他同理        
+	bind 192.168.1.198(本机ip)  //默认ip为127.0.0.1需要改为其他节点机器可访问的ip否则创建集群时无法访问对应的端口无法创建集群
+	daemonize    yes                           //redis后台运行
+	pidfile  /var/run/redis_7000.pid           //pidfile文件对应7000,7001,7002也是一一对应的
+	cluster-enabled  yes                       //开启集群  把注释#去掉
+	cluster-config-file  nodes_7000.conf       //集群的配置  配置文件首次启动自动生成 7000,7001,7002
+	cluster-node-timeout  15000                //请求超时  默认15秒，可自行设置
+	appendonly  yes                            //aof日志开启  有需要就开启，它会每次写操作都记录一条日志
+
+
+接着在另外一台机器上（192.168.1.199），的操作重复以上三步，只是把目录改为7003、7004、7005，对应的配置文件也按照这个规则修改即可
+
+
+启动各个节点
+
+第一台机器上执行
+/usr/local/redis/src/./redis-server /usr/local/redis/redis_cluster/7000/redis.conf
+/usr/local/redis/src/./redis-server /usr/local/redis/redis-server redis_cluster/7001/redis.conf
+/usr/local/redis/src/./redis-server /usr/local/redis/redis-server redis_cluster/7002/redis.conf
+ 
+另外一台机器上执行
+redis-server redis_cluster/7003/redis.conf
+redis-server redis_cluster/7004/redis.conf
+redis-server redis_cluster/7005/redis.conf 
+
+检查启动情况
+ps -ef | grep redis
+root      61020      1  0 02:14 ?        00:00:01 redis-server 127.0.0.1:7000 [cluster]    
+root      61024      1  0 02:14 ?        00:00:01 redis-server 127.0.0.1:7001 [cluster]    
+root      61029      1  0 02:14 ?        00:00:01 redis-server 127.0.0.1:7002 [cluster]    
+ 
+netstat -tnlp | grep redis
+tcp        0      0 127.0.0.1:17000             0.0.0.0:*                   LISTEN      61020/redis-server 
+tcp        0      0 127.0.0.1:17001             0.0.0.0:*                   LISTEN      61024/redis-server 
+tcp        0      0 127.0.0.1:17002             0.0.0.0:*                   LISTEN      61029/redis-server 
+tcp        0      0 127.0.0.1:7000              0.0.0.0:*                   LISTEN      61020/redis-server 
+tcp        0      0 127.0.0.1:7001              0.0.0.0:*                   LISTEN      61024/redis-server 
+tcp        0      0 127.0.0.1:7002              0.0.0.0:*                   LISTEN      61029/redis-server
+
+
+7准备创建集群
+yum -y install ruby ruby-devel rubygems rpm-build
+
+gem install redis 
+
+8创建集群
+redis-trib.rb create --replicas 1 192.168.1.198:7000 192.168.1.198:7001 192.168.1.198:7002 192.168.1.119:7003 192.168.1.119:7004 192.168.1.119:7005
+
+
+
+9如果出现错误
+在/usr/local/redis/src下面找dump.rdb node700*.conf然后删除
+删除之后在全部重启
+之后重新连接我的 就ok;e 
