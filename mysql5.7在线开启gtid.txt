@@ -1,0 +1,29 @@
+在线开启gtid需要满足两个条件
+			1.复制拓扑结构中，所有的数据库版本必须大约等于5.7.6
+			2.gtid_mode必须设置为off
+	
+	1.在拓扑结构中所有服务器运行以下命令
+			set global enforce_gtid_consistency= warn;
+			开启这个选项后 ，让服务器在正常负载下运行一段时间，观察error log,直到不出现warning
+		
+	2.在拓扑结构中所有服务器运行以下命令：
+			set global enforce_gtid_consistency= on;
+			
+	3.在拓扑结构中所有服务器运行以下命令，所有服务器必须执行完这一步才能执行下一步
+			set global gtid_mode=off_permissive;
+			该命令效果：服务器不产生gtid,但是能够接收不带gtid的事务，也能接收带gtid的事务
+			
+	4.在拓扑图中所有服务器运行以下命令
+			set global gtid_mode=on_permissive;
+			该命令效果：服务器产生gtid,但是能够接受不带gtid的事务，也能接收带gtid的事务
+			
+	5.第四步之后，服务器将不产生匿名的gtid,通过以下命令查看是否还存在匿名的gtid,一定要确保该操作的结果为0（多次验证），才可以进行下一步
+			show status like 'ongoing_anonymous_transaction_count';
+		
+	6.确保第五步操作之前的所有binlog都已经被其他服务器应用了，因为匿名的gtid必须确保已经复制应用成功，才可以进行下一步操作
+	
+	7.在所有服务器上执行：
+			set global gtid_mode=on;
+			该命令效果：服务器产生gtid,且只能接收带gtid的事务
+			
+			这里有个很关键的地方：如果master的gtid_mode 为on，那么他的所有slave都只能接受带GTID的事务，所以必须等待所有的slave 都已经接受且应用了不带gtid的事务，才可以将master的gtid_mode 设置为on

@@ -1,0 +1,15 @@
+
+查询Linux 目录下 inodes 占用情况和释放僵尸进程
+
+
+机器跑久了硬盘空间会占用越来越高，同时inodes也会占多，占满后会提示No space left on device 。
+
+快速查询inodes占用情况如下：
+
+for i in /*; do echo $i; find $i | wc -l; done
+
+循环执行，先从 / 开始，然后再进具体目录看。
+
+查看僵尸文件
+
+lsof |grep delete | more

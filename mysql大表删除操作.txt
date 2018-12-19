@@ -1,0 +1,35 @@
+问题分析：
+mysql在删除表的时候，主要分为以下两个过程
+1.buffer pool 页面清除过程。在删除表的时候 innodb 会将文件在buffer pool 中对应的页面清除。对于删除表的页面清除，只需要将页面从flush 对列中删除即可，而不需要去做flush操作，这样可以减小对系统的冲击
+
+2.删除ibd磁盘文件的过程。具体到对buffer pool的影响，删除线程首先会根据要删除表的space id ,从buffer pool 中每一个buffer pool实例的flush list 中找到属于被删除表的页面。在每个实例中搜索页面时，会持有各自buffer pool实例的锁，然后遍历搜索这个buffer pool实例，如果找到了对应的页面，就会将这个页面从flush list中删除，并且将其oldest_modification设置为0,用来表示这个页面已经失效。不过这个操作只是将其从flush list中删除了，他还会在buffer pool的空闲池中存在，以便重新使用
+这里的问题就是如果buffer pool 很大，或者是在buffer pool 中有很多需要被flush的页面，那么此时遍历扫描页面时就会占用比较长的时间，导致其他事物在用到相应buffer pool实例时被阻塞 ，从而影响整个数据库的性能
+ 
+
+select /*+ MAX_EXECUTION_TIME(10) */ * from 大表;  超过十秒 就kill
+
+
+如果磁盘空间够用可以分批次的在业务低峰期来执行delete 操作
+
+
+
+如果磁盘空间不够用就需要用rename的操作来操作  在操作期间要时刻注意磁盘和日志的大小
+mysql中对大表进行rename的操作，一闪而过，rename命令会直接修改底层的.frm文件。
+首先创建一个主从复制 然后选取一个时间点停掉复制  记录写从节点表的主键的最大值 例如是id=50000000
+在主库上创建一个和原业务表一样的表结构 create table sbtest10 like sbtest2 然后观察表的增长情况 预估出需要调节的自增值 
+						select max(id) from sbtest2;
+						ALTER TABLE sbtest10 auto_increment=num ; 
+做rename操作 来操作数据表rename table sbtest2 to sbtest_back,sbtest10 to sbtest2; 这样来保证业务是还连接到原来的表 但是原有的数据 就存在在 sbtest_back这张表中了
+下面要做的就是要把 原有的数据补齐 可以用insert into sbtest2 select * from sbtest_back where id>50000000 这里补齐的是增量的数据写入 
+导入全量的数据 就是可以把从库上的sbtest2mysqldump下来传到 主库上进行导入
+			mysqldump -uroot -p --single-transaction --set-gtid-purged=off --default-character-set=utf8 --skip-add-locks --skip-add-drop-table -t  sbtest sbtest2  --where=" id > 60000000" | gzip > export_sbtest2.sql.gz
+			gunzip < sbtest2.sql.gz | mysql -uroot -p -S /tmp/mysql3306.sock sbtest
+通过show full processlist;来观察导入的情况 并注意 磁盘的情况是否够用,这个时候的插入是不会有锁的可以插入成功
+
+
+ 原理：一个磁盘上的文件，可以由多个文件系统的文件引用，这多个文件的完全相同的，都指向同一个磁盘上的文件，当我们删除任何一个文件的时候，都不会影响真实的文件，只是会将其引用数据减1，只有当被引用数目变为1的时候，再次删除文件，才会真正被删除。删除时，这两种情况的区别很明显，一个是在减少被引用数目，一个是真正做IO来删除它 
+ ln old.ibd old.ibd.hdlk  做硬链接
+ ls -lh old.ibd 查看文件引用数（应该为2）
+
+ 
+ 

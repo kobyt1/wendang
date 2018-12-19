@@ -1,0 +1,4 @@
+select lock_trx_id from information_schema.innodb_locks
+select trx_mysql_thread_id from information_schema.innodb_trx where trx_id=lock_trx_id
+select thread_id from performance_schema.threads where processlist_id=trx_mysql_thread_id
+select * from events_statements_current where thread_id=thread_id

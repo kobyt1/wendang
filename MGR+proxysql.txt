@@ -1,0 +1,74 @@
+mgr查找出当前的主SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME= 'group_replication_primary_member';
+
+
+
+proxysql和mgr配合使用
+
+
+wget https://github.com/sysown/proxysql/releases/download/v1.4.8/proxysql-1.4.8-1-centos67.x86_64.rpm
+
+rpm -ivh proxysql-1.4.8-1-centos67.x86_64.rpm
+
+service proxysql start 
+
+
+[root@VM_0_2_centos ~]# ps -ef|grep proxysql
+root     16358 15152  0 11:00 pts/1    00:00:00 grep --color=auto proxysql
+root     16988     1  0 May18 ?        00:00:00 proxysql -c /etc/proxysql.cnf -D /var/lib/proxysql
+root     16989 16988  0 May18 ?        00:04:42 proxysql -c /etc/proxysql.cnf -D /var/lib/proxysql
+
+登陆数据库 
+mysql -uadmin -padmin -h127.0.0.1 -P6032
+
+
+1.把三个节点的信息插入到mysql_servers表中。
+insert into mysql_servers (hostgroup_id,hostname,port) values (2,'139.199.113.30',3306);
+insert into mysql_servers (hostgroup_id,hostname,port) values (2,'139.119.113.30',3307);
+insert into mysql_servers (hostgroup_id,hostname,port) values (2,'139.119.113.30',3308);
+
+
+2.select * from mysql_servers;
+admin@mysqldb 10:55:6032:  [(none)]> select * from mysql_servers;
++--------------+----------------+------+--------+--------+-------------+-----------------+---------------------+---------+----------------+---------+
+| hostgroup_id | hostname       | port | status | weight | compression | max_connections | max_replication_lag | use_ssl | max_latency_ms | comment |
++--------------+----------------+------+--------+--------+-------------+-----------------+---------------------+---------+----------------+---------+
+| 2            | 139.199.113.30 | 3306 | ONLINE | 1      | 0           | 1000            | 0                   | 0       | 0              |         |
+| 2            | 139.199.113.30 | 3307 | ONLINE | 1      | 0           | 1000            | 0                   | 0       | 0              |         |
+| 2            | 139.199.113.30 | 3308 | ONLINE | 1      | 0           | 1000            | 0                   | 0       | 0              |         |
+
+
+
+3.将MGR集群的分组定义和关键参数写入mysql_group_replication_hostgroups表中
+insert into mysql_group_replication_hostgroups (writer_hostgroup,backup_writer_hostgroup,reader_hostgroup,offline_hostgroup,active,max_writers,writer_is_also_reader,max_transactions_behind)  values (2,4,3,1,1,1,0,100);
+
+4.配置监控账号
+set mysql-monitor_username='proxysql';
+set mysql-monitor_password='proxysql';
+insert into mysql_users(username,password,active,default_hostgroup,transaction_persistent) values('proxysql','proxysql',1,3,1);
+admin> load mysql variables to runtime;
+admin> save mysql variables to disk;
+admin> load mysql servers to runtime;
+admin> save mysql servers to disk;
+admin> load mysql users to runtime;
+admin> save mysql users to disk;
+
+5.配置路由规则
+INSERT INTO mysql_query_rules(active,match_pattern,destination_hostgroup,apply) VALUES(1,'^SELECT.*FOR UPDATE$',2,1);
+INSERT INTO mysql_query_rules(active,match_pattern,destination_hostgroup,apply) VALUES(1,'^SELECT',3,1);
+load mysql query rules to runtime;
+save mysql query rules to disk;
+6.在MGR的主库下添加如下视图，及其依赖的存储过程
+mysql -uroot -p -S /tmp/mysql3308.sock < addition_to_sys.sql
+
+
+7.测试读写分离
+mysql -uproxysql -pproxysql -P6033 -h127.0.0.1
+select * from tablename;
+
+
+8.查看读写分离效果
+select * from stats_mysql_query_digest;
+复制代码
+在proxysql中专门清空stats_mysql_query_digest表的语句：SELECT 1 FROM stats_mysql_query_digest_reset LIMIT 1;
+
+

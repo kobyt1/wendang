@@ -1,0 +1,198 @@
+
+备份整个数据库恢复单表
+innobackupex --defaults-file=/etc/my.cnf --slave-info --safe-slave-backup --parallel=8 --throller=200 --user=backup --password=backup --port --socket=/tmp/mysql3306.sock /data/backup/
+
+把备份的数据导入到要恢复的数据库服务器中去
+
+准备apply-log
+innobackupex --apply-log --export --defaults-file=/etc/my.cnf /data/backup/2018
+
+
+然后通过找到以前的文件来恢复表结构
+mysqldump -ubackup -pbackup hmtplatformdb wms_houseware>wms_houseware.sql
+
+然后把这个表结构 重新创建 
+mysql -uroot -p -S /tmp/mysql3306.sock <wms_houseware.sql
+show create table wms_houseware;
+alter table wms_houseware discard tablespace;
+然后把对应的表的ibd，frm文件拷贝到data目录下  改变属主 然后 
+alter table wms_houseware import tablespace;
+再查看表里的数据 就可以看到了
+这里 再次实验从mysql5.7的备份中恢复到mysql5.6中报错
+ERROR 1808 (HY000): Schema mismatch (Table has ROW_TYPE_COMPACT row format, .ibd file has ROW_TYPE_DYNAMIC row format.
+看错误信息提示是由于row_type不一致 一个是compact一个是dynamic
+由此分别查看一下两个环境中的ROW_FORMAT
+mysql5.6：show tables status like 'sbtest1';
+Name: sbtest1
+         Engine: InnoDB
+        Version: 10
+     Row_format: Compact
+           Rows: 0
+ Avg_row_length: 0
+    Data_length: 16384
+Max_data_length: 0
+   Index_length: 16384
+      Data_free: 0
+ Auto_increment: 9999
+    Create_time: 2018-07-16 16:34:19
+    Update_time: NULL
+     Check_time: NULL
+      Collation: utf8mb4_general_ci
+       Checksum: NULL
+ Create_options: row_format=COMPACT
+        Comment:
+        
+ mysql5.7:	show tables status like 'sbtest1';
+            Name: sbtest1
+         Engine: InnoDB
+        Version: 10
+     Row_format: Dynamic
+           Rows: 9936
+ Avg_row_length: 265
+    Data_length: 2637824
+Max_data_length: 0
+   Index_length: 278528
+      Data_free: 4194304
+ Auto_increment: 10001
+    Create_time: 2018-07-09 14:53:28
+    Update_time: NULL
+     Check_time: NULL
+      Collation: utf8mb4_general_ci
+       Checksum: NULL
+ Create_options: 
+        Comment:
+        
+ 发现了不同那么就进行改正
+ set global innodb_file_format=Barracuda;
+ alter table sbtest1 row_format=dynamic；
+ 在 msyql 5.7.9 及以后版本，默认行格式由innodb_default_row_format变量决定，它的默认值是DYNAMIC，也可以在 create table 的时候指定ROW_FORMAT=DYNAMIC
+注意，如果要修改现有表的行模式为compressed或dynamic，必须先将文件格式设置成Barracuda：set global innodb_file_format=Barracuda;，再用ALTER TABLE tablename ROW_FORMAT=COMPRESSED;去修改才能生效，否则修改无效却无提示：
+
+这样处理之后 在进行 alter table sbtest1 import tablespace；可以导入成功这样就可以进行恢复了
+
+原理
+1 首先会启动一个xtrabackup_log后台检测的进程，实时检测mysql redo的变化，一旦发现redo有新的日志写入，立刻将日志写入到日志文件xtrabackup_log中
+2 复制innodb的数据文件和系统表空间文件idbdata1到对应的以默认时间戳为备份目录的地方
+3 复制结束后，执行flush table with read lock操作
+4 复制.frm .myd .myi文件
+5 并且在这一时刻获得binary log 的位置
+6 将表进行解锁unlock tables
+7 停止xtrabackup_log进程
+
+使用示例：
+		备份
+innobackupex  --defaults-file=/etc/my.cnf  --no-timestamp --tmpdir=/tmp --parallel=4 --throller=200 --user=backup --password=backup --socket=/tmp/mysql3306.sock --host=139.199.113.30  --stream=tar ./  >all.sql.gz
+		apply_log 阶段
+innobackupex --defaults-file=/etc/my.cnf   --apply-log --use-memory=1G /data/koby
+		copy-back阶段
+innobackupex --defaults-file=/etc/my.cnf  --copy-back  /data/koby  
+
+参数：
+		--apply-log
+	通过应用同一目录下的事务日志文件xtrabackup_logfile，在BACKUP-DIR目录准备一个备份。页建立一个新的事务日志文件。innoDB的配置是从innobackupex备份时建立的文件backup-my.cnf读取。
+		--compress
+建立一个innoDB数据文件的压缩备份。它直接提交给xtrabackup的子进程
+		--compres-threads=#
+并行压缩的工作进场数量，它直接提交给xtrabackup的子进程
+		--compress-chunk-size=#
+指定每个压缩进程的内部工作缓冲区的尺寸，用字节来测量。它直接提交给xtrabackup的子进程
+		--copy-back
+复制所有的备份到他们原来的位置
+		--databases=LIST
+指定将要备份的数据库列表。支持databasename.tablename格式，如果没指定参数，则备份所有数据库
+		--decompress
+解压所有以选项--compress备份的，结尾是.qp的文件。使用参数--parallel允许多个文件同时被解密和或解压。
+		--decrypt=ENCRPYTION-ALGORITHM
+解密用--encrpyt选项加密的以.xbcrypt结尾的文件。
+		--defaults-file=[my.cnf]
+通过制定一个字符串来设置MySQL的默认选项
+		--defaults-extra-file=[my.cnf]
+在从标准的默认文件中取值默认之前的额外文件。接收一个字符串作为选项
+		--encrypt=ENCRYPTION-ALGORITHM
+该选项指引xtrabackup使用参数ENCRYPTION_ALGORITHM参数制定的算法，加密innoDB数据文件的备份，它直接指向子进程
+		--encrypt-key=ENCRYPTION_KEY
+指示xtrabackup在备份时使用ENCRYPTION_KEY指定的key做--encrypt加密。它直接传给子进程
+		--encrypt-key-file=ENCRYPTION_KEY_FILE
+当用选项--encrpyt加密时使用存储在ENCRYPTION_KEY_FILE里存储的加密key
+		--encrypt-threads=#
+指定并行加密的工作线程数。它直接传给子进程
+		--encrypt-chunk-size=#
+指定每个加密进程使用的内粗工作缓冲区的尺寸，以字节计算大小
+		--export
+它用于导出单个表用于导入另一个server
+		--extra-lsndir=DIRECTORY
+指定xtrabackup_checkpoints文件的保留目录
+		--force-non-empty-directories
+该参数使得选项--copy-back or --move-back选项传输文件到非空目录。不存在的文件将被覆盖。如果选项--copy-back or --move-back必须从备份目录到一个已经存在的目标目录，则将失败
+		--galera-info
+该选项在备份时建立包含本地节点状态xtrabackup_galera_info文件。用于执行Percona-XtraDB-Cluster备份
+		--host=HOST
+执行通过TCP/IP连接访问数据库的主机，它传给mysql的子进程
+		--ibbackup=IBBACKUP-BINARY
+接收字符串参数，它用来指定要使用的xtrabackup binary、
+		--include=REGEXP
+  指定一个正则表达式，用语匹配格式为databasename.tablename的表名称，它传递给--tables选项
+		--incremental
+  建立一个增量备份，传递给xtrabackup的子进程。该参数可以和参数--incremental-lsn or --incremental-basedir配合使用。
+		--incremental-basedir=DIRECTORY
+  指定一个包换全库备份的目录作为增量备份的基础数据库
+		--incremental-dir=DIRECTORY
+  指定增量备份与全库备份合并去建立一个新的全备份的目录。
+		--incremental-lsn=LSN
+  指定增量备份将要开始的LSN，它替代选项--incremental-basedir
+		--kill-long-queries-timeout=SECONDS
+  该选项指定innobackupex在开始FLUSH TABLES WITH READ LOCK和杀掉这些阻碍他的查询之间的时间的等待时间，以秒计算，默认为0，意味着innobackupex不尝试杀任何查询，
+  该选项需要process and super权限
+		--kill-long-query-type=all|select
+  指定解锁全局锁时将被杀掉的查询类型，默认是all
+		--lock-wait-timeout=SECONDS
+  运行FLUSH TABLES WITH READ LOCK之前，innobackupex等待阻塞查询的时间数(秒数)
+		--lock-wait-threashold=SECONDS
+  选项指定查询运行时间阀值，当innobackupex发现长运行查询伴随着--lock-wait-timeout的一个非0值，
+		--lock-wait-query-type=all|update
+  指定innobackupex发出一个全局锁之前什么类型的查询允许完成
+		--lock-copy-interval=#
+  指定日志日志复制线程检车完成的时间间隔，以毫秒计算
+		--move-back
+  移动之前的所有备份从一个备份目录到他们的原始位置
+		--notimestamp
+  把备份放在一个通过选项backup-root-dir指定的子目录里
+		--no-version-check
+  禁止版本检查
+		--parallel=NUMBER-OF-THREADS
+  该选项接收一个整数，xtarbackup子进程将用于同时备份文件的并发数。如果有多个.ibd文件可以并行，如果只有一个表空间文件，则该选项无效
+		--password=PASSWORD
+  指定连接到数据库的账户密码
+		--port=PORT
+  该选项指定通过TCP/IP连接到数据库时所用的端口
+		--rebuild-indexes
+  只有用--apply-log选项时它才有效，当应用日志后使得xtrabackup重建所有的二级索引。一般用于准备简约备份
+		--rsync
+  使用rsync工具优化本地文件传输。它让xtrabackup使用rsync复制所有非innoDB文件，而不是使用多个cp
+		--safe-slave-backup
+  停止从SQL进程并等待启动备份直到slave_open_temp_tables的值为0。如果没有打开临时表，备份会进行，否则SQL进程将启动并直到没有打开的临时表时停止。如果slave_open_temp_tables在--
+safe-slave-backup-timeout秒后没有变成0，则备份会失败。备份结束后，从SQL进程将重新启动
+		--safe-slave-backup-timeout=SECONDS
+--safe-slave-backup要等slave_open_temp_tables变成0的时间，默认为300秒
+		--scopt=SCP-OPTIONS
+  当参数--remost-host指定时传递给scp的参数
+		--slave-info
+  当备份一个复制从库操作的时候用，它打印二进制日志的position和主库的名字，它页把这些信息写入xtrabackup_slave_info文件作为一个CHANGE MASTER命令
+		--socket=SOCKET
+  指定连接到本地数据库sever时使用的一个unix domain socket，它没有修改的传入mysql子进程
+		--stream=STREMNAME
+  当使用流备份时使用的特定格式。备份将以特定格式传到STDOUT。支持的格式为tar and xbstream
+		--tables-file=FILE
+  指定备份的表的列表，格式为database.tablename
+		--throttle=IOS
+  指定I/O操作的数量/秒。该参数只适用于备份阶段。不适用于参数--apply-log,--copy-back
+		--tmpdir=DIRECTORY
+  在参数--stream使用时指定，是指临时文件被存储的位置
+		--use-memory=#
+  该参数只能和参数--apply-log配合使用，被用于xtrabackup做creash恢复时准备锁使用的内存量(单位：字节)。也支持其他单位，如：1MB,1M,1GB,1G
+		--user=USER
+  指定连接到mysql时使用的用户名
+		--version-check
+  指定该选项后，innobackupex将在建立一个连接后，在备份阶段执行一个版本检查
+		
+

@@ -1,0 +1,41 @@
+ansible -i /etc/ansible/hosts test -m ping -k 
+
+在hosts文件中
+ansible_ssh_user 用于指定用于管理远程主机的账号
+ansible_ssh_host 用于指定被管理的主机
+ansible_ssh_port 用于指定ssh的端口
+ansible_ssh_private_key_file 指定key文件
+host_key_checking=False 当第一次连接远程主机时，会提示输入yes/no,跳过此环节
+
+ansible-doc -l  		ansible查看所有的模块
+
+ansible-doc -s user		ansible查看user模块的具体参数 
+
+
+ansible test -m setup -k        ansible的setup模块 查看收集客户端信息
+
+ansible test -m ping            ansible的ping模块 查看客户端是否存活
+
+ansible test -m file            
+
+force
+group:定义文件/目录的属组
+modr:定义文件/目录的权限
+owner:定义文件/目录的属主
+path:必选项
+recurse:递归的设置文件的属性，只对目录有效
+src:要被链接的源文件的路径，只应用于state=link的情况
+dest:被链接到的路径，只应用于state=link的情况
+state:
+	directory:如果目录不存在，创建目录
+	file:即使文件不存在，也不会被创建
+	link:创建软连接
+	hard:创建硬链接
+	touch:如果文件不存在，则会创建一个新的文件，如果文件或目录已经存在则更新其最后修改时间
+	absent:删除目录，文件或者取消链接文件
+
+示例
+
+ansible test -m file -a "src=/etc/fstab dest=/tmp/fstab state=link"
+ansible test -m file -a "path=/tmp/fstab start=absent"
+ansible test -m file -a "path=/tmp/test state=touch"

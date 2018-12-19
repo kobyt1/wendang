@@ -1,0 +1,3 @@
+groupadd -g 666 zhangtong && useradd -u 666 -g 666 -d /u01/app/zhangtongr -s /bin/bash zhangtong
+
+groupadd -g 702 gerrit && useradd -u 702 -g 702 -d /usr/local/gerrit -s /bin/bash gerrit

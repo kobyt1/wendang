@@ -1,0 +1,67 @@
+表空间传输步骤
+    1.目的服务器：ALTER TABLE t DISCARD TABLESPACE;
+    2.源服务器：FLUSH TABLES t FOR EXPORT;
+    3.从源服务器上拷贝t.ibd,t.cfg文件到目的服务器
+    4.源服务器：UNLOCK TABLES;
+    5.目的服务器：ALTER TABLE t IMPORT TABLESPACE;
+
+需要注意的是命令FLSUH TABLES t for EXPORT会对表t加一个读锁，这意味者在导出的过程中这张表是只读的，用户在拷贝完表空间后需要马上执行命令UNLOCK TABLES来尽快释放读锁。此外，在这个过程中purge线程也会停止。如在线上做某些调试时希望停止purge线程，用此命令也是一个小小的技巧。
+
+5.7的改进在于支持表空间拷贝的基础上，还支持对于分区表中某个分区的表空间拷贝到目的服务器，进一步提升了导出的效率。对于上述的操作来说，只是额外新增了对于分区表的表空间导入与导出语法：
+1
+	# 删除当前表t中的xx分区
+2
+	ALTER TABLE t DISCARD PARTITION XX TABLESPACE;
+3
+	 
+4
+	# 导入xx分区到表t
+5
+	ALTER TABLE t IMPORT PARTITION XX TABLESPACE;
+	
+这里顺便说名下在mysql5.7中的innodb表空间说明 
+
+Undo表空间
+Uodo表空间包含一个或多个undo日志文件。
+Undo通过维护事务修改数据之前的副本来实现一致性的读MVCC。Undo日志也称为回滚段。
+
+innoDB_undo_directory = /data/mysql/mysql3306/data/    默认执行mysql的datadir目录
+
+innoDB_undo_tablespaces = 3                            undo表空间的数量，默认0，最大95  一定要大于两个
+
+innoDB_undo_logs = 128								   在每个undo表空间里的undo日志的数量,默认和最大值都是‘128’[在5.7.19后弃用了，由InnoDB_rollback_segments这个参数来控制]
+
+innoDB_undo_log_truncate = ON						   清空undo 表空间, 默认关闭  [当开启这个参数时, undo 表空间超过InnoDB_max_undo_log_size定义的阈值后会被标记清除. ]
+
+innoDB_rollback_segments = 128						   必须设置为等于或者大于35的值
+
+innodb_max_undo_log_size							   undo日志的最大大小
+
+redo表空间
+Redo logs主要用于崩溃恢复。MySQL启动的时候,InnoDB会自动执行auto recovery，来处理未完成的事务。
+在MySQL 意外崩溃之前没有提交的事务，MySQL会尝试重做。在这个过程中是没法建立到MySQL的连接的
+
+innoDB_log_file_in_group= 3 						   Redo文件组
+
+innoDB_log_buffer_size= 32M 						   缓冲区大小] (如果事务较大，可以适当增大这个参数的值，但是建议不要超过日志文件大小的10-20%)
+
+innodb_log_file_size = 1G							   每个Redo日志的大小]  (如果存储了BLOB等类型的数据，建议适当增大这个参数的值
+
+
+临时表空间
+
+在MySQL 5.7之前，INNODB引擎的临时表都保存在共享表空间里，MySQL 5.7对临时表相关功能进行了优化，将临时表的数据以及回滚信息（仅限于未压缩表）从共享表空间里面剥离出来，形成自己单独的表空间，来降低临时表的创建与删除对其他正常表产生非常大的性能影响（主要是Redo相关的IO操作）。
+
+临时表的undo日志存放在临时表空间里，不能使用裸设备，暂不支持指定临时表空间路径
+
+默认情况下，临时表空间文件ibtmp1 会在每次服务启动时重新创建。
+
+临时表空间不会用于崩溃恢复。
+
+参数：
+InnoDB_temp_data_file_path = ibtmp1:12M:autoextend (默认)
+
+
+
+
+

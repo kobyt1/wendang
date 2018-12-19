@@ -1,0 +1,203 @@
+文件系统通过rsync+sersync实现同步备份
+rsync+sersync更快
+一,
+	服务器A:192.168.1.197 源数据库
+	服务器B:192.168.1.200 目的数据库
+	要实现把A服务器上的文件同步到B服务器上，从而实现备份。要在B服务器上安装配置rsync,在A服务器上安装配置sersync,通过sersync把文件推送到B服务器上
+
+二，开始搭建
+	从B服务器开始
+	1.关闭selinux,
+	2,开通放火墙
+	3，安装rsync(在另一篇文中有)
+	配置A服务器
+	1.先到sersync官网下载
+	wget http://sersync.googlecode.com/files/sersync2.1_64bit_binary.tar.gz
+	2.安装sersync
+	mkdir /usr/local/sersync/{conf,bin,log} -p
+	tar -zxvf sersync2.5_32bit_binary_stable_final.tar.gz
+	cd GNU-Linux-x86/
+	cp confxml.xml /usr/local/sersync/conf
+	cp sersync2 /usr/local/sersync/bin
+
+	3创建密码文件，同B服务器一样，不过这个文件只要保存一个密码就行了，不用用户名，权限也是600
+	echo "root">>/etc/rsync.passswd
+	chmod 600 /etc/rsync.passwd
+	
+	4.配置sersync,配置文件就是上面第二步复制的confxml.xml这个文件，路径在/usr/local/sersync/conf中
+	---------------------------------------------------------------------------------------------------------------------------
+
+<?xml version="1.0" encoding="ISO-8859-1"?>
+
+<head version="2.5">
+
+   # 设置本地IP和端口
+
+   <host hostip="localhost" port="8008"></host>
+
+   # 开启DUBUG模式  
+
+   <debug start="false"/>
+
+   # 开启xfs文件系统
+
+   <fileSystem xfs="false"/>
+
+   # 同步时忽略推送的文件(正则表达式),默认关闭
+
+   <filter start="false">
+
+       <exclude expression="(.*)\.svn"></exclude>
+
+       <exclude expression="(.*)\.gz"></exclude>
+
+       <exclude expression="^info/*"></exclude>
+
+       <exclude expression="^static/*"></exclude>
+
+   </filter>
+
+   <inotify>
+
+   # 设置要监控的事件
+
+       <delete start="true"/>
+
+       <createFolder start="true"/>
+
+       <createFile start="true"/>
+
+       <closeWrite start="true"/>
+
+       <moveFrom start="true"/>
+
+       <moveTo start="true"/>
+
+       <attrib start="true"/>
+
+       <modify start="true"/>
+
+</inotify>
+
+   <sersync>
+
+   # 本地同步的目录路径
+
+       <localpath watch="/data">
+
+   # 远程IP和rsync模块名  
+
+           <remote ip="192.168.1.200" name="rsynctest"/>  
+
+           <!--<remote ip="192.168.8.39" name="tongbu"/>-->
+
+           <!--<remote ip="192.168.8.40" name="tongbu"/>-->
+
+       </localpath>
+
+       <rsync>
+
+   # rsync指令参数
+
+           <commonParams params="-artuvzPg"/>
+
+   # rsync同步认证
+
+           <auth start="true" users="root" passwordfile="/etc/rsync.passwd"/>
+
+   # 设置rsync远程服务端口，远程非默认端口则需打开自定义
+
+           <userDefinedPort start="false" port="874"/><!-- port=874 -->
+
+   # 设置超时时间
+
+           <timeout start="true" time="100"/><!-- timeout=100 -->
+
+   # 设置rsync+ssh加密传输模式,默认关闭，开启需设置SSH加密证书
+
+           <ssh start="false"/>
+
+       </rsync>
+
+    # sersync传输失败日志脚本路径，每隔60会重新执行该脚本，执行完毕会自动清空。
+
+       <failLog path="/usr/local/sersync/log/rsync_fail_log.sh" timeToExecute="60"/><!--default every 60mins execute once-->
+
+    # 设置rsync+crontab定时传输，默认关闭
+
+       <crontab start="false" schedule="600"><!--600mins-->
+
+           <crontabfilter start="false">
+
+               <exclude expression="*.php"></exclude>
+
+               <exclude expression="info/*"></exclude>
+
+           </crontabfilter>
+
+       </crontab>
+
+   # 设置sersync传输后调用name指定的插件脚本，默认关闭
+
+       <plugin start="false" name="command"/>
+
+   </sersync>
+
+   # 插件脚本范例
+
+   <plugin name="command">
+
+       <param prefix="/bin/sh" suffix="" ignoreError="true"/>  <!--prefix /opt/tongbu/mmm.sh suffix-->
+
+       <filter start="false">
+
+           <include expression="(.*)\.php"/>
+
+           <include expression="(.*)\.sh"/>
+
+       </filter>
+
+   </plugin>
+
+   # 插件脚本范例
+
+   <plugin name="socket">
+
+       <localpath watch="/opt/tongbu">
+
+           <deshost ip="192.168.138.20" port="8009"/>
+
+       </localpath>
+
+   </plugin>
+
+   <plugin name="refreshCDN">
+
+       <localpath watch="/data0/htdocs/cms.xoyo.com/site/">
+
+           <cdninfo domainname="ccms.chinacache.com" port="80" username="xxxx" passwd="xxxx"/>
+
+           <sendurl base="http://pic.xoyo.com/cms"/>
+
+           <regexurl regex="false" match="cms.xoyo.com/site([/a-zA-Z0-9]*).xoyo.com/images"/>
+
+       </localpath>
+
+   	</plugin>
+
+	</head>
+
+	------------------------------------------------------------------------------------------------------------------
+
+	5.设置环境变量：
+	echo  "export PATH=$PATH:/usr/local/sersync/bin/" >> /etc/profile
+
+	6.启动sersync
+	sersync2 -r -d -o /usr/local/sersync/conf/confxml.xml
+	注:重启操作如下
+	killall sersync2 && sersync2 -r -d -o /usr/local/sersync/conf/confxml.xml
+
+	7.设置开机启动
+	echo "sersync2 -r -d -o /usr/local/sersync/conf/confxml.xml">>/etc/rc.local
+
+	接下来就是在A的服务器上创建文件来看B上是否成功 如果 想监控哪些可以改# 设置要监控的事件 把相应的true变成false

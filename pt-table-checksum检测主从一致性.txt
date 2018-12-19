@@ -1,0 +1,162 @@
+一 简介
+	pt-table-checksum是percona-toolkit系列工具中的一个，可以用来检测主从数据的一致性。原理是在主库上运行，对同步的表进行checksum，记录下来。然后对比主从中各个表的checksum是否一致，从而判断数据是否一致。检测过程中以块为单位，对于大的表可以区分为多个块，从而避免锁表（根据唯一索引将表切分为块）检测时会自动判断复制延迟，master的负载，超过阀值后会自动将检测暂停。
+	
+	pt-table-sync,顾名思义，他是用来修复多个实例之间数据的不一致。它可以让主从的数据修复到最终一致，也可以使通过应用双写或多写的多个不相关的数据库实例修复到一致。同时它还内部集成了pt-table-checksum的效验功能，可以一边效验一边修复，也可以基于pt-table-checksum的计算结果来进行修复
+
+二 pt-table-checksums工作原理
+1. 连接到主库：pt工具连接到主库，然后自动发现主库的所有从库。默认采用show full processlist来查找从库，但是这只有在主从实例端口相同的情况下才有效。
+2.查找主库或者从库是否有复制过滤规则：这是为了安全而默认检查的选项。你可以关闭这个检查，但是这可能导致checksum的sql语句要么不会同步到从库，要么到了从库发现从库没有要被checksum的表，这都会导致从库同步卡库。
+3. 开始获取表，一个个的计算。
+4. 如果是表的第一个chunk，那么chunk-size一般为1000；如果不是表的第一个chunk，那么采用chunk_time分析出的大小。
+5. 检查表结构，进行数据类型转换等，生成checksum的sql语句。
+6. 根据表上的索引和数据的分布，选择最合适的split表的方法。
+7. 开始checksum表。
+8. 默认在chunk一个表之前，先删除上次这个表相关的计算结果。除非–resume。
+9. 根据explain的结果，判断chunk的size是否超过了你定义的chunk-size的上限。如果超过了，为了不影响线上性能，这个chunk将被忽略。
+10. 把要checksum的行加上for update锁，并计算。
+11. 把计算结果存储到master_crc master_count列中。
+12. 调整下一个chunk的大小。
+13. 等待从库追上主库。如果没有延迟备份的从库在运行，最好检查所有的从库，如果发现延迟最大的从库延迟超过max-lag秒，pt工具在这里将暂停。
+14. 如果发现主库的max-load超过某个阈值，pt工具在这里将暂停。
+15. 继续下一个chunk，直到这个table被chunk完毕。
+16. 等待从库执行完checksum，便于生成汇总的统计结果。每个表汇总并统计一次。
+17. 循环每个表，直到结束
+
+1.单行数据checksum值的计算
+计算逻辑与pt-table-checksum一样，也是先检查表结构，并获取每一列的数据类型，把所有的数据类型都转化为字符串，然后用concat_ws()函数进行连接，由此计算出该行的checksum值。checksuam默认采用crc32计算
+
+2.数据块checksum值的计算
+同pt-table-checksum工具一样，pt-table-sync会智能分析表上的索引，然后把表的数据split成若干个chunk,计算的时候以chunk为单位。可以理解为吧chunk内所有行的数据拼接起来，再计算crc32的值，既得到该chunk的checksum值
+
+3.坏块检测和修复
+前面两步，pt-table-sync与pt-table-checksum的算法和原理一样。再往下，就开始有所不同：
+	pt-table-checksum只是效验，所以它把checksum结果存储到统计表，然后把执行过的sql语句记录到binlog中，任务就算完成。语句级的复制把计算逻辑传递到从库，并在从库执行相同的计算。pt-table-checksum的算法本身并不在意从库的延迟，延迟多少都一样计算，不会影响计算结果的正确性（但我们还是会检测延迟，因为延迟太多会影响业务，所以总是要加上-max-lag来限流）。
+	 pt-table-sync则不同。它首先要完成chunk的checksum值的计算，一旦发现主从上同样的chunk的checksum值不同，就深入到该chunk内部，逐行比较并修复有问题的行。其计算逻辑描述如下（以修复主从结构的数据不一致为例，业务双写的情况修复起来更复杂，因为涉及到冲突解决和基准选择的问题，限于篇幅，这里不介绍）：对每个从库，每一个表。循环进行如下效验和修复过程。对每一个chunk,在硝烟时加上for update锁。一旦获得锁，就记录下当前主库的show master status值
+	在从库上执行select master_pos_wait()函数，等待从库sql线程执行到show master status得到的位置。以此保证，主从上关于这个chunk的内容均不在改变
+	对这个chunk执行checksum,然后与主库的checksum进行比较。
+	如果checksum相同，说明主从数据一致，就继续下一个chunk.
+	如果checksum不同，说明该chunk有不一致。深入chunk内部，逐行计算checksum并比较
+	如果发现某行不一致，则标记下来。继续检测剩余行，知道这个chunk结束。
+	对找到的主从不一致的行，采用repliace into语句，在主库执行一遍以生成该行全量的binlog,并同步到从库，这会以主库数据为基准来修复从库了;对于主库有的行而从库没有的行，采用replace在主库上插入；对于从库有而主库没有的行，通过在主库执行delete来删除
+	直到修复该chunk所有不一致的行，继续检查和修复下一个chunk
+	直到这个从库上所有的表修复结束，开始修复下一个从库
+
+三 效验测试
+
+
+
+
+
+
+	
+1.*pt-table-checkusm 的3.0.4版本  会有检测不出来主从数据不一致的情况
+        主的服务器上安装yum依赖包
+	yum  -y install perl perl-devel perl-Time-HiRes perl-DBI perl-DBD-MySQL perl-Digest-MD5 cmake gcc gcc-c++ libaio libaio-devel automake autoconf bzr  bison libtool ncurses5-devel
+	
+	2.安装percona-toolkit工具包
+	wget http://www.percona.com/get/percona-toolkit.tar.gz
+	tar zxvf percona-toolkit-2.2.13.tar.gz
+	cd percona-toolkit-2.2.13
+	perl Makefile.PL
+	make && make install
+
+	3.主从数据库创建用户及授权
+	
+
+	4.效验
+	pt-table-checksum --nocheck-binlog-format --nocheck-plan --nocheck-replication-filters=test.checksums innodb_lock_wait_timeout=120 --databases=hmt1 h=192.168.1.15,u=root,p=113513,P=3306
+	
+	当执行完毕后出来的结果的每列的含义
+	TS            ：完成检查的时间。
+	ERRORS        ：检查时候发生错误和警告的数量。
+	DIFFS         ：0表示一致，1表示不一致。当指定--no-replicate-check时，会一直为0，当指定--replicate-check-only会显示不同的信息。
+	ROWS          ：表的行数。
+	CHUNKS        ：被划分到表中的块的数目。
+	SKIPPED       ：由于错误或警告或过大，则跳过块的数目。
+	TIME          ：执行的时间。
+	TABLE         ：被检查的表名
+
+
+	关于--recursion-method
+	METHOD			USES
+	================================================
+	processlist		show processlist
+	hosts			show slave hosts
+	cluster			show status like 'wsrep\_incoming\_addresses'
+	dsn=DSN			DSNs from a table
+	none 			Do not find slaves
+	默认是通过show processlist找到host的值或show slave hosts 找到host的值
+	当通过show slave hosts时可能会在host列看到是空白的这时需要在从库的配置文件中添加
+	report_host=slave_ip
+	report_port=slave_port
+
+
+
+作为运行用户的权限
+	select     //查看所有库的表,原理可加 explain选项查看
+	process    //show processlist
+	super      //set binlog_format='statement'
+	replication slave   //show slave hosts
+
+四.参数
+--replicate-check-only :只显示不同步的信息。
+--max-load  
+		 并发线程默认是25
+--max-lag
+
+     默认1S，主从最大延迟，超过这个延迟时间，就会停下来等待从库同步，确定方法是采用Seconds_Behind_Master的值
+
+--chunk-time
+
+     默认是0.5秒，工具会根据当前系统运行繁忙程度计算出在该指定时间内可以处理的数据行数（即chunk），比较灵活
+
+--[no]check-replication-filters
+
+     默认在检查到在主从复制过程中有被用..ignore..过滤掉的表，检查会中断并退出，如果想避开这个检查可以设置--no-check-replication-filters
+
+--replicate
+			用来指定存放计算结果的表名,默认是percona.checksums，工具会默认自动创建库percona和表checksums并将checksum的检查结果输入到这个表中，如果自己用该参数去指定表的话，表结构必须是：
+								CREATE TABLE checksums (
+													db             char(64)     NOT NULL,
+													tbl            char(64)     NOT NULL,
+													chunk          int          NOT NULL,
+													chunk_time     float            NULL,
+													chunk_index    varchar(200)     NULL,
+													lower_boundary text             NULL,
+													upper_boundary text             NULL,
+													this_crc       char(40)     NOT NULL,
+													this_cnt       int          NOT NULL,
+													master_crc     char(40)         NULL,
+													master_cnt     int              NULL,
+													ts             timestamp    NOT NULL,
+													PRIMARY KEY (db, tbl, chunk),
+													INDEX ts_db_tbl (ts, db, tbl)
+													) ENGINE=InnoDB;
+
+
+为了保证主数据库服务的安全，该工具实现了许多保护措施：
+
+    1.自动设置 innodb_lock_wait_timeout 为1s，避免引起
+
+    2.默认当数据库有25个以上的并发查询时，pt-table-checksum会暂停。可以设置 --max-load 选项来设置这个阀值
+
+    3.当用 Ctrl+C 停止任务后，工具会正常的完成当前 chunk 检测，下次使用 --resume 选项启动可以恢复继续下一个 chunk
+
+
+五.常见错误
+
+        Diffs cannot be detected because no slaves were found
+        不能自动找到从库，确认processlist或host或dsns方式用对了。
+
+        Cannot connect to h=slave1.*.com,p=...,u=percona_user
+        可以在pt-table-checksum命令前加PTDEBUG=1来看详细的执行过程，如端口、用户名、权限错误。
+        
+        Waiting for the --replicate table to replicate to XXX
+        问题出在 percona.checksums 表在从库不存在，根本原因是没有从主库同步过来，所以看一下从库是否延迟严重。
+
+        Pausing because Threads_running=25
+        反复打印出类似上面停止检查的信息。这是因为当前数据库正在运行的线程数大于默认25，pt-table-checksum 为了减少对库的压力暂停检查了。等数据库压力过了就好了，或者也可以直接 Ctrl+C 终端，下一次加上--resume继续执行，或者加大--max-load=值。
+
+        字符集问题
+
+	

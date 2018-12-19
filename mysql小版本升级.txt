@@ -1,0 +1,19 @@
+1.下载你想要升级到的mysql版本
+2.解压
+	cd  /opt/mysql/
+	tar -zxvf  mysql-5.7.21-linux-glibc2.12-x86_64.tar.gz
+3.创建连接
+	ln -s mysql-5.7.21-linux-glibc2.12-x86_64 /usr/local/mysql5.7.21
+4.停止原有的服务（这是从库）
+	service mysql stop
+5.更换文件
+	cd /usr/local
+	mv mysql mysql_old
+	mv mysql5.7.21 mysql
+6.启动服务
+	mysqd_safe --user=mysql --datadir=/data/mysql/mysql3306/data &
+7.运用mysql_upgrade检测
+	mysql_upgrade -uroot -p113513
+
+
+在做升级时，一般创建一个从库进行升级，若升级失败，也不会影响到主库；若升级成功，测试也成功，便会将其他的从库也逐渐升级到新版本，最后将主库下线，提升一个从库做新主库，对旧主库进行版本升级

@@ -1,0 +1,66 @@
+	记一次清理表空间碎片的处理方法 表空间的数据大小是用 data_length+index_length 但在我们删除了表中的数据时 发现data文件下的对应的表的ibd文件大小并没有减少
+这个时候我们可以说就是表中有表的碎片 他会影响我们的数据查询速度等 我们来查看一下
+
+（1）查看某个表的碎片大小可以通过
+ show table status like 'tablename';出来的结果中的data_free列的值就是碎片的大小
+（2）列出所有已经产生碎片的表
+ select table_schema,table_name,data_free,engine from information_schema.tables where table_schema not in ('information_schema','mysql') and data_free > 0;
+
+清除表碎片测试
+	先查看data中的表的idb文件的大小
+	du -sh sbtest9.ibd 73M
+	然后登录数据库 进行delete 操作
+	mysql -uroot -p113513 sbtest
+	select conut(*) from sbtest9;
+	delete from sbtest9 where id <900000;
+这个时候我们已经把表中的数据删除很多了，按道理来说ibd文件应该会变小
+我们退出数据库再来看一下
+	du -sh sbtest9  73M
+发现并未变小 这个时候可以确定产生了碎片
+我们可以在表中执行alter table sbtest9 engine='innodb'来清理 但是这样会锁表
+所以我们采用pt-osc来做这件事情
+首先我们在percona下载percona-toolkit.tar.gz
+tar -zxvf percona-toolkit-2.2.13.tar.gz
+cd percona-toolkit-2.2.13
+perl Makefile.PL
+make && make install
+
+
+
+先把要修改的语句 打印出来下
+pt-online-schema-change --host='139.199.113.30' --port=3306 --user='backup' --password='backup' --socket=/tmp/mysql3306.sock --recursion-method='hosts' --max-lag=10 --alter "engine='innodb'" D=sbtest,t=event_detail  --print --dry-run
+
+
+然后开始真正的执行一遍
+pt-online-schema-change --host='139.199.113.30' --port=3306 --user='backup' --password='backup' --socket=/tmp/mysql3306.sock --recursion-method='hosts' --max-lag=10 --alter "engine='innodb'"  D=sbtest,t=event_detail  --print --execute
+
+
+
+pt-online-schema-change也可以在线更改表的结构  下面是在线添加 索引  切记 要在业务低峰期做
+	pt-online-schema-change --host='139.199.113.30' --port=3306 --user='backup' --password='backup' --socket=/tmp/mysql3306.sock --recursion-method='hosts' --max-lag=10 --alter 'add index index_event_batn (event_batno) using btree' D=sbtest,t=event_detail --print --dry-run
+	pt-online-schema-change --host='139.199.113.30' --port=3306 --user='backup' --password='backup' --socket=/tmp/mysql3306.sock --recursion-method='hosts' --max-lag=10 --alter 'add index index_event_batn (event_batno) using btree' D=sbtest,t=event_detail  --print --execute
+
+
+
+
+
+
+
+ALTER TABLE event_detail add index index_event_batn (event_batno) using btree
+
+
+
+
+
+14777
+16562
+5447
+16562
+17001
+13728
+
+
+
+12999 i7 16g 512G huawei  	13.9
+22000 i7 16g 512G apple		15.6
+16999 i7 16g 512G thinkpad	14

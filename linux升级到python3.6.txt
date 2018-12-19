@@ -1,0 +1,12 @@
+1. wget https://www.python.org/ftp/python/3.6.2/Python-3.6.2.tgz
+2. tar -zxvf Python-3.6.2.tgz
+3. cd Python-3.6.2
+4. mkdir /usr/local/python36/
+5. ./configure --prefix=/usr/local/python36/
+6. make && make install
+7. ln -s /usr/local/python36/bin/python3 /usr/bin/python
+8. vi /usr/bin/yum  °Ñ  #!/usr/bin/python    ÐÞ¸ÄÎª£º/usr/bin/python2.6
+9. find / -name pip3
+/usr/local/python36/bin/pip3
+[root@koby bin]# ln -s /usr/local/python36/bin/pip3 /usr/bin/pip3
+   
